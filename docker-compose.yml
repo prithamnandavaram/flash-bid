@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  # Redis - Rate Limiting & Socket.IO Pub/Sub
+  redis:
+    image: redis:alpine
+    container_name: flashbid-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - flashbid-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # MongoDB - Primary Database
+  mongodb:
+    image: mongo:6
+    container_name: flashbid-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password123
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - flashbid-net
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Backend Instance 1
+  backend-1:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flashbid-backend-1
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - MONGO_URI=mongodb://admin:password123@mongodb:27017/flashbid?authSource=admin
+      - JWT_SECRET=your_super_secret_jwt_key_here_change_in_production
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+    depends_on:
+      - redis
+      - mongodb
+    networks:
+      - flashbid-net
+    restart: unless-stopped
+
+  # Backend Instance 2 (for load balancing)
+  backend-2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flashbid-backend-2
+    ports:
+      - "5002:5001"
+    environment:
+      - PORT=5001
+      - MONGO_URI=mongodb://admin:password123@mongodb:27017/flashbid?authSource=admin
+      - JWT_SECRET=your_super_secret_jwt_key_here_change_in_production
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+    depends_on:
+      - redis
+      - mongodb
+    networks:
+      - flashbid-net
+    restart: unless-stopped
+
+  # Backend Instance 3 (for load balancing)
+  backend-3:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flashbid-backend-3
+    ports:
+      - "5003:5001"
+    environment:
+      - PORT=5001
+      - MONGO_URI=mongodb://admin:password123@mongodb:27017/flashbid?authSource=admin
+      - JWT_SECRET=your_super_secret_jwt_key_here_change_in_production
+      - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+    depends_on:
+      - redis
+      - mongodb
+    networks:
+      - flashbid-net
+    restart: unless-stopped
+
+  # Nginx Load Balancer
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: flashbid-nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - backend-1
+      - backend-2
+      - backend-3
+      - frontend
+    networks:
+      - flashbid-net
+    restart: unless-stopped
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: flashbid-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend-1
+      - backend-2
+      - backend-3
+    networks:
+      - flashbid-net
+    restart: unless-stopped
+
+networks:
+  flashbid-net:
+    driver: bridge
+
+volumes:
+  redis_data:
+  mongo_data:
